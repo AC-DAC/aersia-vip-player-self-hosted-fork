@@ -14,6 +14,7 @@ Live instance: privately hosted.
 | Session persistence | Volume + playlist | + Shuffle mode, last track, sequential position |
 | PWA support | None | Installable, standalone display, custom icon |
 | Hosting | GitHub Pages | Self-hosted on Raspberry Pi 4B via Nginx |
+| Playlist format | XML (aersia.net CDN) | JSON (vipvgm.net) + local proxy on Pi |
 
 ---
 
@@ -40,7 +41,7 @@ Browser → Cloudflare (TLS proxy) → Home router (port forward) → Nginx on P
 - **Persistent state** — shuffle preference, last played track, and sequential position all survive page refresh and browser close.
 - **PWA** — installable on Android (Chrome) and iOS (Safari) via Add to Home Screen. Launches full-screen with custom icon.
 - **Privacy** — `robots.txt` + `noindex` meta tag. No inbound links. Not discoverable via search engines.
-- **Live playlist** — roster XML files fetched directly from Aersia's CDN on every load. No local music storage required. Playlist updates automatically when Aersia updates.
+- **Live playlist** — roster JSON files served from a local Pi proxy (`/roster/`), refreshed weekly via cron from `vipvgm.net`. WAP and CPP still use XML from the original Aersia CDN. No local music storage required.
 
 ---
 
@@ -101,16 +102,22 @@ Nginx config at `/etc/nginx/sites-available/aersia` — HTTP redirects to HTTPS,
 
 ## Playlists
 
-All playlists stream directly from Aersia's CDN:
+VIP, Mellow, Exiled, and Source use the `vipvgm.net` JSON API. WAP and CPP still use XML from the original Aersia CDN.
 
-| Playlist | URL |
-|----------|-----|
-| VIP | `//vip.aersia.net/roster.xml` |
-| Mellow | `//vip.aersia.net/roster-mellow.xml` |
-| Source | `//vip.aersia.net/roster-source.xml` |
-| Exiled | `//vip.aersia.net/roster-exiled.xml` |
-| WAP | `//wap.aersia.net/roster.xml` |
-| CPP | `//cpp.aersia.net/roster.xml` |
+| Playlist | Format | Source |
+|----------|--------|--------|
+| VIP | JSON | `vipvgm.net/roster.min.json` (local proxy) |
+| Source | JSON | `vipvgm.net/roster.min.json` — filtered to tracks with `s_file`, served from `mu/source/` |
+| Mellow | JSON | `vipvgm.net/roster-mellow.min.json` (local proxy) |
+| Exiled | JSON | `vipvgm.net/roster-exiled.min.json` (local proxy) |
+| WAP | XML | `wap.aersia.net/roster.xml` |
+| CPP | XML | `cpp.aersia.net/roster.xml` |
+
+**Why a local proxy?** `vipvgm.net` does not include `Access-Control-Allow-Origin` headers on its JSON roster files, blocking cross-origin requests from the browser. Audio files are served with permissive CORS headers and stream directly from `vipvgm.net/mu/`. The local proxy only applies to the small roster metadata files, not the audio itself.
+
+**Roster refresh:** `update-aersia-roster.sh` runs weekly via cron and re-fetches the three JSON files to `/var/www/aersia/roster/`. If the fetch fails, the last known good copy continues to be served.
+
+**Known limitation:** Some Source playlist tracks return 302 redirects because their `s_file` slug does not correspond to an existing file on `vipvgm.net`. This is an upstream data inconsistency in Cats777's roster, not a player bug.
 
 ---
 

@@ -30,12 +30,12 @@
 	var is_dragging_scrubber = false;
 
 	var PLAYLISTS = {
-		'VIP': '//vip.aersia.net/roster.xml',
-		'Mellow': '//vip.aersia.net/roster-mellow.xml',
-		'Source': '//vip.aersia.net/roster-source.xml',
-		'Exiled': '//vip.aersia.net/roster-exiled.xml',
-		'WAP': '//wap.aersia.net/roster.xml',
-		'CPP': '//cpp.aersia.net/roster.xml',
+    	'VIP':    { url: '/roster/roster.min.json',        format: 'json' },
+    	'Source': { url: '/roster/roster.min.json',        format: 'json', fileField: 's_file', baseUrl: 'https://www.vipvgm.net/mu/source/' },
+    	'Mellow': { url: '/roster/roster-mellow.min.json', format: 'json' },
+    	'Exiled': { url: '/roster/roster-exiled.min.json', format: 'json' },
+    	'WAP':    { url: '//wap.aersia.net/roster.xml',    format: 'xml' },
+    	'CPP':    { url: '//cpp.aersia.net/roster.xml',    format: 'xml' },
 	};
 
 	var DEFAULT_PLAYLIST = 'VIP';
@@ -87,19 +87,29 @@
 		};
 	}
 
+	function parsePlaylistJSON (data, config) {
+		var fileField = config.fileField || 'file';
+		var baseUrl = config.baseUrl || data.url;
+		return data.tracks
+			.filter (function (track) { return !!track[fileField]; })
+			.map (function (track) {
+				return {
+					creator:  track.game,
+					title:    track.title,
+					location: baseUrl + track[fileField] + '.' + data.ext
+				};
+			});
+	}
+
 	function parsePlaylist (playlistXML) {
-		result = [];
-
+		var result = [];
 		$(playlistXML).find ('playlist trackList > track').each (function () {
-			track = {
-				creator: $(this).find ('creator').text (),
-				title: $(this).find ('title').text (),
+			result.push ({
+				creator:  $(this).find ('creator').text (),
+				title:    $(this).find ('title').text (),
 				location: $(this).find ('location').text ()
-			};
-
-			result.push (track);
+			});
 		});
-
 		return result;
 	}
 
@@ -162,7 +172,7 @@
 	}
 
 	function loadNewPlaylist (playlist, track) {
-		var playlistURL = PLAYLISTS[playlist];
+		var config = PLAYLISTS[playlist];
 		var selected_track = track;
 
 		localStorage['playlist'] = playlist;
@@ -174,19 +184,21 @@
 		g_previous_idx = 0;
 		g_playlist = null;
 
-		$.ajax({
-			url: playlistURL,
+		var ajaxOptions = {
+			url: config.url,
 			success: function (data) {
 				// Parse track list
-				g_playlist = parsePlaylist (data);
+				g_playlist = config.format === 'json'
+					? parsePlaylistJSON (data, config)
+					: parsePlaylist (data);
 
 				// Build HTML table for track listing
 				for (var i = 0; i < g_playlist.length; ++i) {
-					var track = g_playlist[i];
+					var t = g_playlist[i];
 
 					var row = $('<div>');
-					row.text (track.creator + ' - ' + track.title);
-					row.attr ('id', createTrackId (track));
+					row.text (t.creator + ' - ' + t.title);
+					row.attr ('id', createTrackId (t));
 
 					row.appendTo ('#tracks-table');
 					(function (i) {
@@ -212,7 +224,11 @@
 					playNextTrack ();
 				}
 			}
-		});
+		};
+
+		if (config.format === 'json') ajaxOptions.dataType = 'json';
+
+		$.ajax (ajaxOptions);
 	};
 
 	function playpause () {
