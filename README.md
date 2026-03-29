@@ -11,8 +11,8 @@ Live instance: privately hosted.
 | Feature | Upstream | This Fork |
 |---------|----------|-----------|
 | Playback mode | Shuffle only | Shuffle + Sequential toggle |
-| Session persistence | Volume + playlist | + Shuffle mode, last track, sequential position |
-| PWA support | None | Installable, standalone display, custom icon |
+| Session persistence | Volume + playlist | + Shuffle mode, per-playlist last track and position |
+| PWA support | None | Installable, standalone display, custom icon, lock screen controls |
 | Hosting | GitHub Pages | Self-hosted on Raspberry Pi 4B via Nginx |
 | Playlist format | XML (aersia.net CDN) | JSON (vipvgm.net) + local proxy on Pi |
 
@@ -37,9 +37,9 @@ Browser → Cloudflare (TLS proxy) → Home router (port forward) → Nginx on P
 
 ## Features
 
-- **Sequential mode** — play tracks in playlist order rather than random. Toggle via the shuffle button in the control bar (`fa-random` = shuffle, `fa-list-ol` = sequential).
-- **Persistent state** — shuffle preference, last played track, and sequential position all survive page refresh and browser close.
-- **PWA** — installable on Android (Chrome) and iOS (Safari) via Add to Home Screen. Launches full-screen with custom icon.
+- **Sequential mode** — play tracks in playlist order rather than random. Toggle via the shuffle button in the control bar (`fa-random` = shuffle, `fa-list-ol` = sequential). Pressing Next always advances from the currently playing track, regardless of whether it was reached via the next button or by clicking directly.
+- **Persistent state** — shuffle preference and last played track/position are stored per-playlist. Switching from VIP to Source and back restores your position in each playlist independently.
+- **PWA** — installable on Android (Chrome) and iOS (Safari) via Add to Home Screen. Launches full-screen with custom icon. Lock screen shows track title and artist with next/previous controls via the Media Session API.
 - **Privacy** — `robots.txt` + `noindex` meta tag. No inbound links. Not discoverable via search engines.
 - **Live playlist** — roster JSON files served from a local Pi proxy (`/roster/`), refreshed weekly via cron from `vipvgm.net`. WAP and CPP still use XML from the original Aersia CDN. No local music storage required.
 
@@ -53,12 +53,16 @@ State is stored in `localStorage` with the following keys:
 |-----|------|---------|
 | `playlist` | string | Active playlist name (VIP, Mellow, etc.) |
 | `shuffle` | boolean string | Playback mode |
-| `last_track` | string | Track ID string — used to restore UI highlight and scroll position |
-| `last_track_idx` | integer | Track array index — used to seed `g_previous` for correct sequential advance |
+| `last_track_<playlist>` | string | Track ID string per playlist — restores UI highlight and scroll position |
+| `last_track_idx_<playlist>` | integer | Track array index per playlist — unused directly (history is built by `playTrack`) |
+
+For example: `last_track_VIP`, `last_track_Source`, `last_track_Mellow`.
 
 **Priority chain on load:** default → localStorage → URL hash (each overrides the previous).
 
-**Sequential position fix:** the upstream player's `playNextTrack()` calculates the next index from `g_previous`, which is only populated during a session. On reload, `g_previous` is empty, causing sequential mode to always reset to track 0. This fork seeds `g_previous = [restoredIdx]` immediately after the restored track element is clicked during playlist load.
+**Per-playlist position:** each playlist stores its last position independently. Switching playlists restores where you left off in the target playlist rather than starting from the top.
+
+**Sequential position:** `playTrack()` always pushes to `g_previous` and updates `g_previous_idx`, regardless of whether a track was reached via Next/Prev or by clicking directly. This means pressing Next always advances from the current track, not from wherever the last auto-advance left off.
 
 ---
 
@@ -92,9 +96,11 @@ The live instance is privately hosted. The site is intentionally undiscoverable 
 Copy updated files to the Pi:
 
 ```bash
-scp ./index.html pi:/var/www/aersia/
-ssh pi 'sudo chown alex:www-data /var/www/aersia/index.html'
+scp ./index.html ./sw.js pi:/var/www/aersia/
+ssh pi 'sudo chown alex:www-data /var/www/aersia/index.html /var/www/aersia/sw.js'
 ```
+
+**Service worker versions:** v1 and v2 were written and deployed directly on the Pi (not in this repo). v3 is the first version tracked here — it caches the app shell (`/`, `index.html`, `manifest.json`, `favicon.ico`) and skips audio requests so they stream directly from the CDN. Bumping the `CACHE` constant forces clients to drop the old cache and install the new SW.
 
 Nginx config at `/etc/nginx/sites-available/aersia` — HTTP redirects to HTTPS, SSL served from Let's Encrypt certificates.
 

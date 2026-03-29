@@ -160,11 +160,31 @@
 		var trackelem = $('#tracks-table div').eq (trackid);
 		trackelem.addClass ('selected');
 
+		var pl = $('#select-playlist').val ();
 		window.location.hash = createTrackId (track);
-		localStorage['last_track'] = createTrackId (track);
-		localStorage['last_track_idx'] = trackid;
+		localStorage['last_track_' + pl] = createTrackId (track);
+		localStorage['last_track_idx_' + pl] = trackid;
 		$('audio').attr ('src', track.location);
 		$('audio').trigger ('play');
+
+		if ('mediaSession' in navigator) {
+			navigator.mediaSession.metadata = new MediaMetadata ({
+				title:  track.title,
+				artist: track.creator,
+			});
+			navigator.mediaSession.setActionHandler ('play',          function () { $('audio').trigger ('play'); });
+			navigator.mediaSession.setActionHandler ('pause',         function () { $('audio').trigger ('pause'); });
+			navigator.mediaSession.setActionHandler ('nexttrack',     playNextTrack);
+			navigator.mediaSession.setActionHandler ('previoustrack', playPreviousTrack);
+		}
+
+		// Keep navigation history current so next/prev work from this track
+		g_previous.push (trackid);
+		g_previous_idx = g_previous.length - 1;
+		while (g_previous.length > MAX_HISTORY) {
+			g_previous.shift ();
+			g_previous_idx -= 1;
+		}
 
 		$('html, body').stop ().animate ({
 			scrollTop: trackelem.offset ().top - $('.control-bar').height ()
@@ -215,11 +235,6 @@
 
 				if (elements.length > 0) {
 					elements[0].click ();
-					var restoredIdx = parseInt (localStorage.getItem ('last_track_idx'));
-					if (!isNaN (restoredIdx)) {
-						g_previous = [restoredIdx];
-						g_previous_idx = 0;
-					}
 				} else {
 					playNextTrack ();
 				}
@@ -343,7 +358,8 @@
 
 		$('#select-playlist').on ('change', function () {
 			var playlist = $('#select-playlist').val ();
-			loadNewPlaylist (playlist, '');
+			var track = localStorage.getItem ('last_track_' + playlist) || '';
+			loadNewPlaylist (playlist, track);
 		});
 
 		$('#volume-slider').slider({
@@ -394,8 +410,8 @@
 			$('#btn-shuffle i').toggleClass('fa-list-ol', !g_shuffle);
 		}
 
-		if (!g_shuffle && localStorage.getItem ('last_track') !== null)
-			track = localStorage.getItem ('last_track');
+		if (!g_shuffle && localStorage.getItem ('last_track_' + playlist) !== null)
+			track = localStorage.getItem ('last_track_' + playlist);
 
 		// If hash is set, override playlist and track
 		var url_track = parseTrackId (window.location.hash.substr (1));
