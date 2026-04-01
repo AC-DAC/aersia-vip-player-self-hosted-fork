@@ -1,4 +1,4 @@
-# Aersia VIP Player — Self-Hosted Fork
+# Aersia VIPVGM Player — Self-Hosted Fork
 
 A self-hosted fork of [fpgaminer/vip-html5-player](https://github.com/fpgaminer/vip-html5-player), an HTML5 player for the [Vidya Intarweb Playlist](https://www.vipvgm.net) curated by Cats777 at [Aersia.net](https://aersia.net).
 
