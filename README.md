@@ -4,6 +4,8 @@ A self-hosted fork of [fpgaminer/vip-html5-player](https://github.com/fpgaminer/
 
 Live instance: privately hosted.
 
+![Aersia VIP Player](assets/screenshots/aersia-player.png)
+
 ---
 
 ## What's Different From Upstream
