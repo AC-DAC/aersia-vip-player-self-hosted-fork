@@ -11,13 +11,6 @@
 <link rel="icon" type="image/png" sizes="32x32" href="/favicon-32x32.png">
 <link rel="icon" type="image/png" sizes="16x16" href="/favicon-16x16.png">
 <link rel="shortcut icon" href="/favicon.ico">
-<link rel="manifest" href="/manifest.json">
-<meta name="theme-color" content="#183c63">
-<script>
-    if ('serviceWorker' in navigator) {
-        navigator.serviceWorker.register('/sw.js');
-    }
-</script>
 <script>
 	var g_playlist = null;
 	var g_previous = [];
@@ -28,10 +21,13 @@
 
 	var scrubp = 0;
 	var is_dragging_scrubber = false;
+	var g_user_paused = false;
+	var g_retrying = false;
 
 	var PLAYLISTS = {
+    	'Omni':   { playlists: ['VIP', 'Mellow', 'Exiled', 'WAP', 'CPP'] },
     	'VIP':    { url: '/roster/roster.min.json',        format: 'json' },
-    	//'Source': { url: '/roster/roster.min.json', 	   format: 'json', fileField: 's_file' },
+    	'Source': { url: '/roster/roster.min.json', 	   format: 'json', fileField: 's_file', fallbackField: 'file', baseUrl: 'https://www.vipvgm.net/mu/source/' },
     	'Mellow': { url: '/roster/roster-mellow.min.json', format: 'json' },
     	'Exiled': { url: '/roster/roster-exiled.min.json', format: 'json' },
     	'WAP':    { url: '//wap.aersia.net/roster.xml',    format: 'xml' },
@@ -89,6 +85,7 @@
 
 	function parsePlaylistJSON (data, config) {
 		var fileField = config.fileField || 'file';
+		var fallbackField = config.fallbackField || null;
 		var baseUrl = config.baseUrl || data.url;
 		return data.tracks
 			.filter (function (track) { return !!track[fileField]; })
@@ -96,7 +93,10 @@
 				return {
 					creator:  track.game,
 					title:    track.title,
-					location: baseUrl + track[fileField] + '.' + data.ext
+					location: baseUrl + track[fileField] + '.' + data.ext,
+					fallback: fallbackField && track[fallbackField]
+						? data.url + track[fallbackField] + '.' + data.ext
+						: null
 				};
 			});
 	}
@@ -116,6 +116,11 @@
 	function playPreviousTrack () {
 		if (g_playlist === null)
 			return;
+
+		if (g_shuffle) {
+			$('audio')[0].currentTime = 0;
+			return;
+		}
 
 		if (g_previous_idx <= 0)
 			g_previous_idx = 0;
@@ -154,6 +159,7 @@
 
 
 	function playTrack (trackid) {
+		g_retrying = false;
 		var track = g_playlist[trackid];
 
 		$('#tracks-table .selected').removeClass ('selected');
@@ -165,25 +171,21 @@
 		localStorage['last_track_' + pl] = createTrackId (track);
 		localStorage['last_track_idx_' + pl] = trackid;
 		$('audio').attr ('src', track.location);
-		$('audio').trigger ('play');
+		g_user_paused = false;
+		var audioEl = $('audio')[0];
+		audioEl.play().catch(function(err) {
+			console.warn('[aersia] play() rejected:', err.name, err.message);
+		});
 
-		if ('mediaSession' in navigator) {
-			navigator.mediaSession.metadata = new MediaMetadata ({
-				title:  track.title,
-				artist: track.creator,
-			});
-			navigator.mediaSession.setActionHandler ('play',          function () { $('audio').trigger ('play'); });
-			navigator.mediaSession.setActionHandler ('pause',         function () { $('audio').trigger ('pause'); });
-			navigator.mediaSession.setActionHandler ('nexttrack',     playNextTrack);
-			navigator.mediaSession.setActionHandler ('previoustrack', playPreviousTrack);
-		}
-
-		// Keep navigation history current so next/prev work from this track
-		g_previous.push (trackid);
-		g_previous_idx = g_previous.length - 1;
-		while (g_previous.length > MAX_HISTORY) {
-			g_previous.shift ();
-			g_previous_idx -= 1;
+// Keep navigation history current so next/prev work from this track.
+		// Guard against double-push when called from playNextTrack(), which already pushed.
+		if (g_previous[g_previous_idx] !== trackid) {
+			g_previous.push (trackid);
+			g_previous_idx = g_previous.length - 1;
+			while (g_previous.length > MAX_HISTORY) {
+				g_previous.shift ();
+				g_previous_idx -= 1;
+			}
 		}
 
 		$('html, body').stop ().animate ({
@@ -204,40 +206,67 @@
 		g_previous_idx = 0;
 		g_playlist = null;
 
+		function onPlaylistReady () {
+			// Build HTML table for track listing
+			for (var i = 0; i < g_playlist.length; ++i) {
+				var t = g_playlist[i];
+
+				var row = $('<div>');
+				row.text (t.creator + ' - ' + t.title);
+				row.attr ('id', createTrackId (t));
+
+				row.appendTo ('#tracks-table');
+				(function (i) {
+					row.click (function () {
+						playTrack (i);
+					});
+				}) (i);
+			}
+
+			// Select specified track if possible, or play random track if not.
+			var elements = $('#tracks-table div').filter (function (idx, elem) {
+				return elem.id == selected_track;
+			});
+
+			if (elements.length > 0) {
+				elements[0].click ();
+			} else {
+				playNextTrack ();
+			}
+		}
+
+		if (config.playlists) {
+			var names = config.playlists;
+			var requests = names.map (function (name) {
+				var c = PLAYLISTS[name];
+				return $.ajax ({ url: c.url, dataType: c.format === 'json' ? 'json' : 'xml' });
+			});
+			$.when.apply ($, requests).then (function () {
+				var results = Array.prototype.slice.call (arguments);
+				g_playlist = [].concat.apply ([], results.map (function (r, i) {
+					var data = r[0];
+					var c = PLAYLISTS[names[i]];
+					return c.format === 'json'
+						? parsePlaylistJSON (data, c)
+						: parsePlaylist (data);
+				}));
+
+				g_playlist.sort (function (a, b) {
+					return (a.creator + ' ' + a.title).localeCompare (b.creator + ' ' + b.title);
+				});
+
+				onPlaylistReady ();
+			});
+			return;
+		}
+
 		var ajaxOptions = {
 			url: config.url,
 			success: function (data) {
-				// Parse track list
 				g_playlist = config.format === 'json'
 					? parsePlaylistJSON (data, config)
 					: parsePlaylist (data);
-
-				// Build HTML table for track listing
-				for (var i = 0; i < g_playlist.length; ++i) {
-					var t = g_playlist[i];
-
-					var row = $('<div>');
-					row.text (t.creator + ' - ' + t.title);
-					row.attr ('id', createTrackId (t));
-
-					row.appendTo ('#tracks-table');
-					(function (i) {
-						row.click (function () {
-							playTrack (i);
-						});
-					}) (i);
-				}
-
-				// Select specified track if possible, or play random track if not.
-				var elements = $('#tracks-table div').filter (function (idx, elem) {
-					return elem.id == selected_track;
-				});
-
-				if (elements.length > 0) {
-					elements[0].click ();
-				} else {
-					playNextTrack ();
-				}
+				onPlaylistReady ();
 			}
 		};
 
@@ -247,10 +276,16 @@
 	};
 
 	function playpause () {
-		if ($('audio').get (0).paused)
-			$('audio').trigger ('play');
-		else
-			$('audio').trigger ('pause');
+		var audioEl = $('audio')[0];
+		if (audioEl.paused) {
+			g_user_paused = false;
+			audioEl.play().catch(function(err) {
+				console.warn('[aersia] play() rejected:', err.name, err.message);
+			});
+		} else {
+			g_user_paused = true;
+			audioEl.pause();
+		}
 	}
 
 	function toggleLooping () {
@@ -282,15 +317,26 @@
 		$('audio').on ('pause', function () {
 			$('#btn-play i').removeClass ('fa-pause');
 			$('#btn-play i').addClass ('fa-play');
-		});
+			});
 
 		$('audio').on ('play', function () {
 			$('#btn-play i').removeClass ('fa-play');
 			$('#btn-play i').addClass ('fa-pause');
-		});
+			});
 
 		$('audio').on ('error', function () {
-			playNextTrack ();
+			var trackid = g_previous[g_previous_idx];
+			var track = g_playlist ? g_playlist[trackid] : null;
+			if (!g_retrying && track && track.fallback) {
+				g_retrying = true;
+				$('audio').attr ('src', track.fallback);
+				$('audio')[0].play().catch(function(err) {
+					console.warn('[aersia] fallback play() rejected:', err.name, err.message);
+				});
+			} else {
+				g_retrying = false;
+				playNextTrack ();
+			}
 		});
 
 		$('audio').on ('timeupdate', function () {
@@ -329,6 +375,15 @@
 		$('audio').on ('ended', function () {
 			if (!g_looping)
 				playNextTrack ();
+		});
+
+		document.addEventListener('visibilitychange', function () {
+			if (!document.hidden && !g_user_paused) {
+				var audioEl = $('audio')[0];
+				if (audioEl.paused && audioEl.src) {
+					audioEl.play().catch(function() {});
+				}
+			}
 		});
 
 		$('#btn-play').click (playpause);
