@@ -24,7 +24,7 @@ Live instance: privately hosted.
 ## Infrastructure
 
 ```
-Browser → Cloudflare (TLS proxy) → Home router (port forward) → Nginx on Pi → index.html
+Browser → Cloudflare (TLS proxy) → Cloudflare Tunnel → Nginx on Pi → index.html
 ```
 
 | Component | Detail |
@@ -32,8 +32,8 @@ Browser → Cloudflare (TLS proxy) → Home router (port forward) → Nginx on P
 | Server | Raspberry Pi 4 Model B 4GB, Debian Trixie ARM64 |
 | Web server | Nginx 1.26 |
 | TLS | Let's Encrypt via Certbot (DNS-01 challenge, Cloudflare plugin) |
-| DNS | Cloudflare — proxied, home IP hidden |
-| Dynamic DNS | Shell script + cron, Cloudflare API, runs every 5 minutes |
+| DNS | Cloudflare — CNAME to Cloudflare Tunnel, home IP not exposed |
+| External access | Cloudflare Tunnel — outbound only, no open inbound ports, ISP-agnostic |
 | Domain | Subdomain isolates from future portfolio at root domain |
 
 ---
@@ -69,16 +69,11 @@ State is stored in `localStorage` with the following keys:
 
 ---
 
-## Dynamic DNS
+## External Access
 
-`update-cloudflare-dns.sh` runs every 5 minutes via cron:
+External access is handled via Cloudflare Tunnel (`cloudflared`), running as a systemd service on the Pi. The tunnel establishes an outbound-only connection to Cloudflare's edge — no port forwarding required, no dynamic DNS maintenance, and the home IP is never exposed.
 
-1. Fetches current public IP from `ifconfig.me`
-2. Fetches current A record value from Cloudflare API
-3. If different, updates the A record via PUT
-4. Logs all activity to `/var/log/cloudflare-dns-update.log`
-
-Requires a Cloudflare API token scoped to `Zone → DNS → Edit + Read` for the target zone.
+The previous dynamic DNS approach (`update-cloudflare-dns.sh` + cron) was retired after an ISP change to a residential plan that blocks inbound ports 80/443.
 
 ---
 
