@@ -17,7 +17,7 @@ Live instance: privately hosted.
 | Session persistence | Volume + playlist | + Shuffle mode, per-playlist last track and position |
 | Hosting | GitHub Pages | Self-hosted on Raspberry Pi 4B via Nginx |
 | Playlist format | XML (aersia.net CDN) | JSON (vipvgm.net) + local proxy on Pi |
-| Playlists | VIP, Mellow, Source, Exiled, WAP, CPP | VIP, Source, Mellow, Exiled, Omni, WAP, CPP |
+| Playlists | VIP, Mellow, Source, Exiled, WAP | VIP, Source, Mellow, Exiled, Omni, WAP |
 
 ---
 
@@ -46,7 +46,7 @@ Browser → Cloudflare (TLS proxy) → Cloudflare Tunnel → Nginx on Pi → ind
 - **Source fallback** — Source playlist tracks attempt to stream from `mu/source/` first. On failure, the player automatically retries from `mu/` before skipping to the next track.
 - **Omni playlist** — merges VIP, Mellow, and Exiled into a single A-Z sorted playlist. Fetches all three rosters in parallel and concatenates results before rendering the track list.
 - **Privacy** — `robots.txt` + `noindex` meta tag. No inbound links. Not discoverable via search engines.
-- **Live playlist** — roster JSON files served from a local Pi proxy (`/roster/`), refreshed weekly via cron from `vipvgm.net`. WAP and CPP still use XML from the original Aersia CDN. No local music storage required.
+- **Live playlist** — roster JSON files served from a local Pi proxy (`/roster/`), refreshed weekly via cron from `vipvgm.net`. WAP still uses XML from the original Aersia CDN. No local music storage required.
 
 ---
 
@@ -114,7 +114,6 @@ Nginx config at `/etc/nginx/sites-available/aersia` — HTTP redirects to HTTPS,
 | Exiled | JSON | ✅ Active — `vipvgm.net/roster-exiled.min.json` (local proxy) |
 | Omni | JSON | ✅ Active — VIP + Mellow + Exiled merged and sorted A-Z |
 | WAP | XML | ✅ Active — `wap.aersia.net/roster.xml` |
-| CPP | XML | ✅ Active — `cpp.aersia.net/roster.xml` |
 
 **Why a local proxy?** `vipvgm.net` does not include `Access-Control-Allow-Origin` headers on its JSON roster files, blocking cross-origin requests from the browser. Audio files are served with permissive CORS headers and stream directly from `vipvgm.net/mu/`. The local proxy only applies to the small roster metadata files, not the audio itself.
 
