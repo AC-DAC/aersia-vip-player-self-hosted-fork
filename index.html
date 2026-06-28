@@ -25,13 +25,12 @@
 	var g_retrying = false;
 
 	var PLAYLISTS = {
-    	'Omni':   { playlists: ['VIP', 'Mellow', 'Exiled', 'WAP', 'CPP'] },
+    	'Omni':   { playlists: ['VIP', 'Mellow', 'Exiled', 'WAP'] },
     	'VIP':    { url: '/roster/roster.min.json',        format: 'json' },
     	'Source': { url: '/roster/roster.min.json', 	   format: 'json', fileField: 's_file', fallbackField: 'file', baseUrl: 'https://www.vipvgm.net/mu/source/' },
     	'Mellow': { url: '/roster/roster-mellow.min.json', format: 'json' },
     	'Exiled': { url: '/roster/roster-exiled.min.json', format: 'json' },
-    	'WAP':    { url: '//wap.aersia.net/roster.xml',    format: 'xml' },
-    	'CPP':    { url: '//cpp.aersia.net/roster.xml',    format: 'xml' },
+    	'WAP':    { url: 'https://wap.aersia.net/roster.xml', format: 'xml' },
 	};
 
 	var DEFAULT_PLAYLIST = 'VIP';
@@ -104,10 +103,13 @@
 	function parsePlaylist (playlistXML) {
 		var result = [];
 		$(playlistXML).find ('playlist trackList > track').each (function () {
+			var location = $(this).find ('location').text ();
+			// Upgrade insecure URLs to HTTPS to avoid mixed-content blocking
+			location = location.replace (/^http:\/\//, 'https://');
 			result.push ({
 				creator:  $(this).find ('creator').text (),
 				title:    $(this).find ('title').text (),
-				location: $(this).find ('location').text ()
+				location: location
 			});
 		});
 		return result;
@@ -239,17 +241,21 @@
 			var names = config.playlists;
 			var requests = names.map (function (name) {
 				var c = PLAYLISTS[name];
-				return $.ajax ({ url: c.url, dataType: c.format === 'json' ? 'json' : 'xml' });
+				// Wrap each request so a failure resolves as null instead of rejecting the whole batch
+				return $.ajax ({ url: c.url, dataType: c.format === 'json' ? 'json' : 'xml' })
+					.then (function (data) { return { data: data, name: name }; },
+					       function ()     { return $.Deferred().resolve(null).promise(); });
 			});
 			$.when.apply ($, requests).then (function () {
 				var results = Array.prototype.slice.call (arguments);
-				g_playlist = [].concat.apply ([], results.map (function (r, i) {
-					var data = r[0];
-					var c = PLAYLISTS[names[i]];
-					return c.format === 'json'
-						? parsePlaylistJSON (data, c)
-						: parsePlaylist (data);
-				}));
+				g_playlist = [].concat.apply ([], results
+					.filter (function (r) { return r !== null; })
+					.map (function (r) {
+						var c = PLAYLISTS[r.name];
+						return c.format === 'json'
+							? parsePlaylistJSON (r.data, c)
+							: parsePlaylist (r.data);
+					}));
 
 				g_playlist.sort (function (a, b) {
 					return (a.creator + ' ' + a.title).localeCompare (b.creator + ' ' + b.title);
