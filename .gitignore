@@ -1,2 +1,6 @@
 .DS_Store
 memory/
+.env
+*.env
+*.pem
+*.key
